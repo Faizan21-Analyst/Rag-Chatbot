@@ -1,3 +1,7 @@
+import sys
+print(f"Python version: {sys.version}", flush=True)
+print("app.py starting...", flush=True)
+
 import streamlit as st
 import traceback
 import sys
