@@ -1,6 +1,26 @@
+# langgraph_rag_backend.py
 import sys
+import os
+import sqlite3
+from dotenv import load_dotenv
+
 print("backend.py starting...", flush=True)
-sys.stdout.flush()
+
+load_dotenv()
+
+# ── API Key check ──────────────────────────────────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+if not GROQ_API_KEY:
+    raise EnvironmentError("GROQ_API_KEY not set. Add it in Streamlit Cloud → Settings → Secrets.")
+
+print("GROQ_API_KEY found.", flush=True)
+
+# ── Imports ────────────────────────────────────────────────────
+from typing import TypedDict, Annotated, Optional
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
@@ -11,32 +31,9 @@ from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 
-from typing import TypedDict, Annotated, Optional
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-import sqlite3
-import os
-from dotenv import load_dotenv
+print("All imports done.", flush=True)
 
-load_dotenv()
-
-print("Backend starting...")
-
-# ─────────────────────────────────────────────────────────────
-# API Key check
-# ─────────────────────────────────────────────────────────────
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-if not GROQ_API_KEY:
-    raise EnvironmentError(
-        "GROQ_API_KEY not set. Add it in HuggingFace Space Settings → Secrets."
-    )
-
-print("GROQ_API_KEY found.")
-
-# ─────────────────────────────────────────────────────────────
-# LLM
-# ─────────────────────────────────────────────────────────────
+# ── LLM ───────────────────────────────────────────────────────
 llm = ChatGroq(
     model="llama3-70b-8192",
     groq_api_key=GROQ_API_KEY,
@@ -44,11 +41,9 @@ llm = ChatGroq(
 tools = [DuckDuckGoSearchRun(region="us-en")]
 llm_with_tools = llm.bind_tools(tools)
 
-print("LLM ready.")
+print("LLM ready.", flush=True)
 
-# ─────────────────────────────────────────────────────────────
-# Lightweight TF-IDF RAG store (no torch, no GPU, ~5MB RAM)
-# ─────────────────────────────────────────────────────────────
+# ── TF-IDF RAG Store ──────────────────────────────────────────
 class TFIDFStore:
     def __init__(self):
         self.chunks: list[str] = []
@@ -69,14 +64,9 @@ class TFIDFStore:
         top_k = np.argsort(scores)[::-1][:k]
         return [self.chunks[i] for i in top_k if scores[i] > 0]
 
-
-# Per-thread TF-IDF stores
 _stores: dict[str, TFIDFStore] = {}
 
-
-# ─────────────────────────────────────────────────────────────
-# Document helpers
-# ─────────────────────────────────────────────────────────────
+# ── Document helpers ──────────────────────────────────────────
 def _load_file(file_path: str):
     ext = os.path.splitext(file_path)[-1].lower()
     if ext == ".pdf":
@@ -97,15 +87,12 @@ def ingest_document(thread_id: str, file_path: str) -> str:
     )
     chunks = splitter.split_documents(docs)
     if not chunks:
-        return "No text could be extracted from the document."
-
+        return "⚠️ No text could be extracted from the document."
     texts = [c.page_content for c in chunks]
-
     if thread_id not in _stores:
         _stores[thread_id] = TFIDFStore()
     _stores[thread_id].add_texts(texts)
-
-    return f"Ingested {len(texts)} chunks from '{os.path.basename(file_path)}'."
+    return f"✅ Ingested {len(texts)} chunks from '{os.path.basename(file_path)}'."
 
 
 def retrieve_context(thread_id: str, query: str, k: int = 4) -> str:
@@ -119,17 +106,13 @@ def clear_documents(thread_id: str):
     _stores.pop(thread_id, None)
 
 
-# ─────────────────────────────────────────────────────────────
-# State schema
-# ─────────────────────────────────────────────────────────────
+# ── State schema ──────────────────────────────────────────────
 class chatbot(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     thread_id: Optional[str]
 
 
-# ─────────────────────────────────────────────────────────────
-# Chat node
-# ─────────────────────────────────────────────────────────────
+# ── Chat node ─────────────────────────────────────────────────
 def chat_mod(state: chatbot):
     msgs = state["messages"]
     thread_id = state.get("thread_id", "")
@@ -168,9 +151,7 @@ def chat_mod(state: chatbot):
     return {"messages": [res]}
 
 
-# ─────────────────────────────────────────────────────────────
-# Graph
-# ─────────────────────────────────────────────────────────────
+# ── Graph ─────────────────────────────────────────────────────
 tool_node = ToolNode(tools)
 
 DB_PATH = "/data/chat_bot_rag.db" if os.path.exists("/data") else "chat_bot_rag.db"
@@ -195,7 +176,7 @@ graph.add_edge("tools", "chat_mod")
 
 rag_work = graph.compile(checkpointer=checkpointer)
 
-print("Graph compiled. App ready.")
+print("Graph compiled. Backend ready.", flush=True)
 
 
 def list_thread():
