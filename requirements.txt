@@ -4,9 +4,9 @@ langchain-community
 langchain-groq
 langgraph
 langgraph-checkpoint-sqlite
-faiss-cpu
-sentence-transformers
+scikit-learn
 pypdf
 docx2txt
 python-dotenv
 duckduckgo-search
+numpy
