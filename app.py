@@ -1,25 +1,32 @@
-# rag_frontend.py
-# Streamlit frontend for the RAG chatbot
-# Compatible with HuggingFace Spaces (free tier)
-
-from dotenv import load_dotenv
 import streamlit as st
-from langgraph_rag_backend import rag_work, list_thread, ingest_document, clear_documents
+import traceback
+import sys
+
+st.set_page_config(page_title="RAG Chatbot", page_icon="📄")
+
+# ── Try importing the backend and catch ANY error ──────────────
+try:
+    from langgraph_rag_backend import rag_work, list_thread, ingest_document, clear_documents
+    BACKEND_OK = True
+    BACKEND_ERROR = None
+except Exception as e:
+    BACKEND_OK = False
+    BACKEND_ERROR = traceback.format_exc()
+
+# ── If backend failed, show the error on screen ───────────────
+if not BACKEND_OK:
+    st.error("❌ Backend failed to load. See error below:")
+    st.code(BACKEND_ERROR, language="python")
+    st.stop()
+
+# ── Normal imports only reached if backend loaded fine ────────
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 import uuid
 import tempfile
 import os
 
 load_dotenv()
-
-# ─────────────────────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="RAG Chatbot",
-    page_icon="📄",
-    layout="wide",
-)
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -34,8 +41,6 @@ def reset_chat():
     st.session_state["message_history"] = []
     st.session_state["uploaded_files_info"] = []
     add_thread(thread_id)
-    # NOTE: vector store for old thread stays in memory;
-    # clear_documents(old_thread_id) if you want strict isolation
 
 
 def add_thread(thread_id):
@@ -51,11 +56,6 @@ def load_conversation(thread_id):
 
 
 def get_ai_response(user_input: str, thread_id: str) -> str:
-    """
-    Run the graph synchronously and return the final AI text.
-    Uses work.invoke so it's compatible with HuggingFace Spaces
-    (which can have issues with async generators in Streamlit).
-    """
     CONFIG = {
         "configurable": {"thread_id": thread_id},
         "metadata": {"thread_id": thread_id},
@@ -68,7 +68,6 @@ def get_ai_response(user_input: str, thread_id: str) -> str:
         },
         config=CONFIG,
     )
-    # Last message in state is the AI reply
     last = result["messages"][-1]
     return last.content if hasattr(last, "content") else str(last)
 
@@ -96,10 +95,8 @@ add_thread(st.session_state["thread_id"])
 with st.sidebar:
     st.title("📄 RAG Chatbot")
     st.caption("Upload documents · Chat · Switch threads")
-
     st.divider()
 
-    # ── Document upload ──────────────────────────────────────
     st.subheader("📁 Upload Documents")
     uploaded_files = st.file_uploader(
         "PDF, TXT, or DOCX",
@@ -110,7 +107,6 @@ with st.sidebar:
 
     if uploaded_files:
         for uf in uploaded_files:
-            # Track by (thread_id, file_name) so we don't re-ingest
             key = (st.session_state["thread_id"], uf.name)
             if key not in st.session_state["uploaded_files_info"]:
                 with tempfile.NamedTemporaryFile(
@@ -119,14 +115,11 @@ with st.sidebar:
                 ) as tmp:
                     tmp.write(uf.read())
                     tmp_path = tmp.name
-
                 status = ingest_document(st.session_state["thread_id"], tmp_path)
-                os.unlink(tmp_path)          # clean up temp file
-
+                os.unlink(tmp_path)
                 st.session_state["uploaded_files_info"].append(key)
                 st.success(status)
 
-    # Show already-ingested files for this thread
     ingested = [
         fname
         for (tid, fname) in st.session_state["uploaded_files_info"]
@@ -138,8 +131,6 @@ with st.sidebar:
             st.caption(f"• {f}")
 
     st.divider()
-
-    # ── Thread controls ──────────────────────────────────────
     st.button("➕ New Chat", on_click=reset_chat, use_container_width=True)
 
     st.subheader("💬 Conversations")
@@ -150,7 +141,7 @@ with st.sidebar:
         msgs = state.values.get("messages", []) if state else []
         label = msgs[-1].content[:28] + "…" if msgs else "New Chat"
 
-        if st.button(f"🗂 {label}", key=f"thread_{thread_id}", use_container_width=True):
+        if st.sidebar.button(f"🗂 {label}", key=f"thread_{thread_id}", use_container_width=True):
             st.session_state["thread_id"] = thread_id
             raw_msgs = load_conversation(thread_id)
             history = []
@@ -169,23 +160,19 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────
 st.header("🤖 RAG Chat Assistant")
 
-# Render existing history
 for msg in st.session_state["message_history"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ── User input ───────────────────────────────────────────────
 user_input = st.chat_input("Ask me anything — or ask about your documents…")
 
 if user_input:
-    # Show user message immediately
     st.session_state["message_history"].append(
         {"role": "user", "content": user_input}
     )
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Get AI response with a spinner (HuggingFace-safe: no streaming generator)
     with st.chat_message("AI"):
         with st.spinner("Thinking…"):
             ai_reply = get_ai_response(user_input, st.session_state["thread_id"])
