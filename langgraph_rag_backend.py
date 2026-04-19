@@ -1,3 +1,6 @@
+import sys
+print("backend.py starting...", flush=True)
+sys.stdout.flush()
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
