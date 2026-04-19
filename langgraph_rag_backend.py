@@ -2,38 +2,79 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_groq import ChatGroq
-
-# RAG imports
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 
 from typing import TypedDict, Annotated, Optional
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 import sqlite3
 import os
-import tempfile
+from dotenv import load_dotenv
 
+load_dotenv()
 
+print("Backend starting...")
 
+# ─────────────────────────────────────────────────────────────
+# API Key check
+# ─────────────────────────────────────────────────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+if not GROQ_API_KEY:
+    raise EnvironmentError(
+        "GROQ_API_KEY not set. Add it in HuggingFace Space Settings → Secrets."
+    )
+
+print("GROQ_API_KEY found.")
+
+# ─────────────────────────────────────────────────────────────
+# LLM
+# ─────────────────────────────────────────────────────────────
 llm = ChatGroq(
-    model="openai/gpt-oss-120b",groq_api_key=os.getenv("GROQ_API_KEY", "")
+    model="llama3-70b-8192",
+    groq_api_key=GROQ_API_KEY,
 )
-
 tools = [DuckDuckGoSearchRun(region="us-en")]
 llm_with_tools = llm.bind_tools(tools)
 
+print("LLM ready.")
 
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+# ─────────────────────────────────────────────────────────────
+# Lightweight TF-IDF RAG store (no torch, no GPU, ~5MB RAM)
+# ─────────────────────────────────────────────────────────────
+class TFIDFStore:
+    def __init__(self):
+        self.chunks: list[str] = []
+        self.vectorizer = TfidfVectorizer(stop_words="english")
+        self.matrix = None
+        self._fitted = False
 
-_vector_stores: dict[str, FAISS] = {}
+    def add_texts(self, texts: list[str]):
+        self.chunks.extend(texts)
+        self.matrix = self.vectorizer.fit_transform(self.chunks)
+        self._fitted = True
 
+    def search(self, query: str, k: int = 4) -> list[str]:
+        if not self._fitted or not self.chunks:
+            return []
+        query_vec = self.vectorizer.transform([query])
+        scores = cosine_similarity(query_vec, self.matrix).flatten()
+        top_k = np.argsort(scores)[::-1][:k]
+        return [self.chunks[i] for i in top_k if scores[i] > 0]
+
+
+# Per-thread TF-IDF stores
+_stores: dict[str, TFIDFStore] = {}
+
+
+# ─────────────────────────────────────────────────────────────
+# Document helpers
+# ─────────────────────────────────────────────────────────────
 def _load_file(file_path: str):
-    """Load a file into LangChain Documents based on extension."""
     ext = os.path.splitext(file_path)[-1].lower()
     if ext == ".pdf":
         loader = PyPDFLoader(file_path)
@@ -45,77 +86,69 @@ def _load_file(file_path: str):
 
 
 def ingest_document(thread_id: str, file_path: str) -> str:
-    """
-    Chunk a document, embed it, and store in the thread's vector store.
-    Returns a short status message.
-    """
     docs = _load_file(file_path)
-
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=80,
         separators=["\n\n", "\n", ".", " "],
     )
     chunks = splitter.split_documents(docs)
-
     if not chunks:
         return "No text could be extracted from the document."
 
-    if thread_id in _vector_stores:
-        # Append to existing store for this thread
-        _vector_stores[thread_id].add_documents(chunks)
-    else:
-        _vector_stores[thread_id] = FAISS.from_documents(chunks, embeddings)
+    texts = [c.page_content for c in chunks]
 
-    return f"Ingested {len(chunks)} chunks from '{os.path.basename(file_path)}'."
+    if thread_id not in _stores:
+        _stores[thread_id] = TFIDFStore()
+    _stores[thread_id].add_texts(texts)
+
+    return f"Ingested {len(texts)} chunks from '{os.path.basename(file_path)}'."
 
 
 def retrieve_context(thread_id: str, query: str, k: int = 4) -> str:
-    """Return the top-k relevant chunks as a single string, or empty string."""
-    if thread_id not in _vector_stores:
+    if thread_id not in _stores:
         return ""
-    results = _vector_stores[thread_id].similarity_search(query, k=k)
-    if not results:
-        return ""
-    return "\n\n---\n\n".join(doc.page_content for doc in results)
+    results = _stores[thread_id].search(query, k=k)
+    return "\n\n---\n\n".join(results)
 
 
 def clear_documents(thread_id: str):
-    """Remove the vector store for a thread (useful on 'New Chat')."""
-    _vector_stores.pop(thread_id, None)
+    _stores.pop(thread_id, None)
 
 
-
+# ─────────────────────────────────────────────────────────────
+# State schema
+# ─────────────────────────────────────────────────────────────
 class chatbot(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
-    thread_id: Optional[str]          
+    thread_id: Optional[str]
 
 
-
+# ─────────────────────────────────────────────────────────────
+# Chat node
+# ─────────────────────────────────────────────────────────────
 def chat_mod(state: chatbot):
     msgs = state["messages"]
     thread_id = state.get("thread_id", "")
 
-    
     query = ""
     for m in reversed(msgs):
         if isinstance(m, HumanMessage):
             query = m.content
             break
 
-    # Pull relevant doc chunks (empty string if no docs uploaded)
     context = retrieve_context(thread_id, query) if thread_id else ""
 
     if context:
         rag_block = (
             "The user has uploaded document(s). Use the excerpts below to answer "
-            "if they are relevant. If not relevant, answer from your own knowledge.\n\n"
+            "if relevant. If not relevant, answer from your own knowledge.\n\n"
             f"=== Document Excerpts ===\n{context}\n========================"
         )
     else:
         rag_block = (
-            "No documents have been uploaded for this session. "
-            "Answer from your own knowledge or use the search tool if needed."
+            "No documents uploaded. Answer from your own knowledge "
+            "or use the search tool if needed."
         )
 
     system_msg = SystemMessage(
@@ -132,13 +165,13 @@ def chat_mod(state: chatbot):
     return {"messages": [res]}
 
 
-
-
-
+# ─────────────────────────────────────────────────────────────
+# Graph
+# ─────────────────────────────────────────────────────────────
 tool_node = ToolNode(tools)
-import os
-os.makedirs("/data", exist_ok=True)
-conn = sqlite3.connect(database="/data/chat_bot_rag.db", check_same_thread=False)
+
+DB_PATH = "/data/chat_bot_rag.db" if os.path.exists("/data") else "chat_bot_rag.db"
+conn = sqlite3.connect(database=DB_PATH, check_same_thread=False)
 checkpointer = SqliteSaver(conn=conn)
 
 graph = StateGraph(chatbot)
@@ -159,8 +192,7 @@ graph.add_edge("tools", "chat_mod")
 
 rag_work = graph.compile(checkpointer=checkpointer)
 
-
-
+print("Graph compiled. App ready.")
 
 
 def list_thread():
