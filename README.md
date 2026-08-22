@@ -30,7 +30,7 @@ LangGraph StateGraph
     ├── chat_mod node  ←── RAG context injected here (TF-IDF retrieval)
     │       │
     │       ▼
-    │   Groq LLM (llama-3.3-70b-versatile)
+    │   Groq LLM (qwen/qwen3.6-27b)
     │       │
     │       ▼
     │   Tool call? ──YES──► tools node (DuckDuckGo Search)
@@ -226,7 +226,7 @@ GROQ_API_KEY = "gsk_your_key_here"
 | Layer | Technology |
 |---|---|
 | Agent Framework | LangGraph 1.1.8 |
-| LLM Provider | Groq (llama-3.3-70b-versatile) |
+| LLM Provider | Groq (qwen/qwen3.6-27b) |
 | LLM Orchestration | LangChain 1.2.15 |
 | Document Loading | LangChain Community loaders |
 | Text Splitting | LangChain Text Splitters |
