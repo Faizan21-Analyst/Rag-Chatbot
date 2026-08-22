@@ -57,7 +57,7 @@ class TFIDFStore:
         query_vec = self.vectorizer.transform([query])
         scores = cosine_similarity(query_vec, self.matrix).flatten()
         top_k = np.argsort(scores)[::-1][:k]
-        return [self.chunks[i] for i in top_k if scores[i] > 0]
+        return [self.chunks[i] for i in top_k]
 
 _stores: dict[str, TFIDFStore] = {}
 
@@ -115,6 +115,7 @@ def chat_mod(state: chatbot):
             query = m.content
             break
 
+    has_docs = bool(thread_id and thread_id in _stores and _stores[thread_id].chunks)
     context = retrieve_context(thread_id, query) if thread_id else ""
 
     if context:
@@ -122,6 +123,14 @@ def chat_mod(state: chatbot):
             "The user has uploaded document(s). Use the excerpts below to answer "
             "if relevant. If not relevant, answer from your own knowledge.\n\n"
             f"=== Document Excerpts ===\n{context}\n========================"
+        )
+    elif has_docs:
+        rag_block = (
+            "The user has uploaded document(s) for this conversation, but no "
+            "clearly matching excerpt was found for this specific question. "
+            "Let the user know the uploaded document doesn't seem to cover "
+            "this, rather than saying no document was uploaded, and answer "
+            "from your own knowledge if you can."
         )
     else:
         rag_block = (
