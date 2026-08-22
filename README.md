@@ -2,7 +2,7 @@
 
 A production-deployed, agentic RAG (Retrieval-Augmented Generation) chatbot with multi-turn memory, document Q&A, and web search — built with LangGraph StateGraph and deployed on Streamlit Cloud.
 
-🔗 **Live Demo:** [https://faizananalyst-rag-chatbot.streamlit.app](https://faizananalyst-rag-chatbot.streamlit.app)
+🔗 **Live Demo:** https://rag-chatbot-usmfvweczsdkn4kndbejcs.streamlit.app/
 
 ---
 
