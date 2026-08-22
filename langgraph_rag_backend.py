@@ -1,4 +1,3 @@
-# langgraph_rag_backend.py
 import sys
 import os
 import sqlite3
@@ -8,14 +7,12 @@ print("backend.py starting...", flush=True)
 
 load_dotenv()
 
-# ── API Key check ──────────────────────────────────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 if not GROQ_API_KEY:
     raise EnvironmentError("GROQ_API_KEY not set. Add it in Streamlit Cloud → Settings → Secrets.")
 
 print("GROQ_API_KEY found.", flush=True)
 
-# ── Imports ────────────────────────────────────────────────────
 from typing import TypedDict, Annotated, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -33,9 +30,8 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2t
 
 print("All imports done.", flush=True)
 
-# ── LLM ───────────────────────────────────────────────────────
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3.6-27b",
     groq_api_key=GROQ_API_KEY,
 )
 tools = [DuckDuckGoSearchRun(region="us-en")]
@@ -43,7 +39,6 @@ llm_with_tools = llm.bind_tools(tools)
 
 print("LLM ready.", flush=True)
 
-# ── TF-IDF RAG Store ──────────────────────────────────────────
 class TFIDFStore:
     def __init__(self):
         self.chunks: list[str] = []
@@ -66,7 +61,6 @@ class TFIDFStore:
 
 _stores: dict[str, TFIDFStore] = {}
 
-# ── Document helpers ──────────────────────────────────────────
 def _load_file(file_path: str):
     ext = os.path.splitext(file_path)[-1].lower()
     if ext == ".pdf":
@@ -106,13 +100,11 @@ def clear_documents(thread_id: str):
     _stores.pop(thread_id, None)
 
 
-# ── State schema ──────────────────────────────────────────────
 class chatbot(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     thread_id: Optional[str]
 
 
-# ── Chat node ─────────────────────────────────────────────────
 def chat_mod(state: chatbot):
     msgs = state["messages"]
     thread_id = state.get("thread_id", "")
@@ -151,7 +143,6 @@ def chat_mod(state: chatbot):
     return {"messages": [res]}
 
 
-# ── Graph ─────────────────────────────────────────────────────
 tool_node = ToolNode(tools)
 
 DB_PATH = "/data/chat_bot_rag.db" if os.path.exists("/data") else "chat_bot_rag.db"

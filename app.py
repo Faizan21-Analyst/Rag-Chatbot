@@ -21,7 +21,6 @@ import uuid
 import tempfile
 import os
 
-# ── Helpers ───────────────────────────────────────────────────
 def generate_thread_id():
     return str(uuid.uuid4())
 
@@ -53,7 +52,6 @@ def get_ai_response(user_input: str, thread_id: str) -> str:
     last = result["messages"][-1]
     return last.content if hasattr(last, "content") else str(last)
 
-# ── Session state ─────────────────────────────────────────────
 if "message_history" not in st.session_state:
     st.session_state["message_history"] = []
 if "thread_id" not in st.session_state:
@@ -65,7 +63,6 @@ if "uploaded_files_info" not in st.session_state:
 
 add_thread(st.session_state["thread_id"])
 
-# ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
     st.title("📄 RAG Chatbot")
     st.caption("Upload documents · Chat · Switch threads")
@@ -125,7 +122,6 @@ with st.sidebar:
     st.divider()
     st.caption(f"Thread: `{str(st.session_state['thread_id'])[:8]}…`")
 
-# ── Main chat ─────────────────────────────────────────────────
 st.header(" RAG Chat Assistant")
 
 for msg in st.session_state["message_history"]:
