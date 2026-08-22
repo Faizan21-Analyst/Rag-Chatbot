@@ -9,7 +9,7 @@ A production-deployed, agentic RAG (Retrieval-Augmented Generation) chatbot with
 ## 📌 What This Project Does
 
 This chatbot lets you:
-- **Chat** with an LLM (Groq `llama-3.3-70b-versatile`) with full conversation memory
+- **Chat** with an LLM (Groq `qwen/qwen3.6-27b`) with full conversation memory
 - **Upload documents** (PDF, DOCX, TXT) and ask questions directly from their content
 - **Switch between conversation threads** — each thread has its own isolated memory and document store
 - **Search the web** automatically when the LLM needs current information (DuckDuckGo tool)
@@ -48,7 +48,7 @@ SQLite Checkpointer (persistent memory per thread_id)
 | Component | Technology | Purpose |
 |---|---|---|
 | Agent Graph | LangGraph `StateGraph` | Conditional routing, tool calling, iterative loops |
-| LLM | Groq `llama-3.3-70b-versatile` | Fast inference, free API |
+| LLM | Groq `qwen/qwen3.6-27b` | Fast inference, free API |
 | RAG Retrieval | TF-IDF (`scikit-learn`) | Lightweight, no GPU needed |
 | Memory | SQLite + `SqliteSaver` | Persistent multi-turn conversation history |
 | Web Search | DuckDuckGo via LangChain | Real-time information retrieval |
